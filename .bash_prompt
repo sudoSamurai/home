@@ -1,0 +1,431 @@
+# sudoSamurai prompt
+# I am a huge fan of liquidprompt (https://github.com/nojhan/liquidprompt)
+# but I hate when the prompt I type at moves around, so I decided to make my own.
+# This started as an oh-my-zsh (https://github.com/robbyrussell/oh-my-zsh)
+# theme, but I found that 99% of the systems I use don't have a new enough zsh to
+# support the features I want (if they even has zsh at all.)  I decided I needed
+# something that works in bash as well as zsh, takes a lot of my favorite ideas
+# from liquidprompt, gives me a lot of useful info, but keeps my $/%/# stationary.
+
+### TODO ###
+# Fix virtualenv / RVM detection
+
+# Do not load if this is not an interactive prompt (stolen from liquidprompt) 
+test -z "$TERM" -o "$TERM" = dumb && return
+
+ssp_oe='\['
+ssp_ce='\]'
+ssp_user="\u"
+ssp_host="\h"
+ssp_time="\D{%I:%M%p}"
+ssp_prompt="\$"
+ssp_pwd="\w"
+ssp_returncode="$?"
+ssp_date="\D{%D}"
+ssp_jobs="\j"
+ssp_histnum="\!"
+
+# Eventually going to reset the prompt to this if something doesn't play well with the script.
+# PS1='\u@\h \w \$ '
+
+ssp_set_colors()
+{
+
+  local ti_sgr0="$( { tput sgr0 || tput me ; } 2>/dev/null )"
+  local ti_bold="$( { tput bold || tput md ; } 2>/dev/null )"
+  local ti_setaf
+  if tput setaf >/dev/null 2>&1 ; then
+    ti_setaf () { tput setaf "$1" ; }
+  else
+    echo "terminal $TERM not supported" >&2
+    ti_setaf () { : ; }
+  fi
+
+    ssp_bold="${ssp_oe}${ti_bold}${ssp_ce}"
+    ssp_blk="${ssp_oe}$(ti_setaf 0)${ssp_ce}"
+    ssp_bldblk="${ssp_oe}$(ti_setaf 0)${ssp_ce}"
+    ssp_wht="${ssp_oe}$(ti_setaf 7)${ssp_ce}"
+    ssp_bldwht="${ssp_oe}${ti_bold}$(ti_setaf 7)${ssp_ce}"
+    ssp_red="${ssp_oe}$(ti_setaf 1)${ssp_ce}"
+    ssp_bldred="${ssp_oe}${ti_bold}$(ti_setaf 1)${ssp_ce}"
+    ssp_wrnred="${ssp_oe}$(ti_setaf 0 ; tput setab 1)${ssp_ce}"
+    ssp_crtred="${ssp_oe}${ti_bold}$(ti_setaf 7 ; tput setab 1)${ssp_ce}"
+    ssp_dgrred="${ssp_oe}${ti_bold}$(ti_setaf 3 ; tput setab 1)${ssp_ce}"
+    ssp_grn="${ssp_oe}$(ti_setaf 2)${ssp_ce}"
+    ssp_bldgrn="${ssp_oe}${ti_bold}$(ti_setaf 2)${ssp_ce}"
+    ssp_yel="${ssp_oe}$(ti_setaf 3)${ssp_ce}"
+    ssp_bldyel="${ssp_oe}${ti_bold}$(ti_setaf 3)${ssp_ce}"
+    ssp_blu="${ssp_oe}$(ti_setaf 4)${ssp_ce}"
+    ssp_bldblu="${ssp_oe}${ti_bold}$(ti_setaf 4)${ssp_ce}"
+    ssp_mag="${ssp_oe}$(ti_setaf 5)${ssp_ce}"
+    ssp_pnk="${ssp_oe}${ti_bold}$(ti_setaf 5)${ssp_ce}"
+    ssp_cyn="${ssp_oe}$(ti_setaf 6)${ssp_ce}"
+    ssp_bldcyn="${ssp_oe}${ti_bold}$(ti_setaf 6)${ssp_ce}"
+    ssp_rst="${ssp_oe}${ti_sgr0}${ssp_ce}"
+
+    unset ti_sgr0 ti_bold ti_setaf
+}
+
+ssp_set_colors
+unset _ssp_set_colors
+
+# ssprompt specific variables
+LB="${ssp_grn}[${ssp_rst}"
+RB="${ssp_grn}]${ssp_rst}"
+LP="${ssp_mag}(${ssp_rst}"
+RP="${ssp_mag})${ssp_rst}"
+DASH="${ssp_mag}-${ssp_rst}"
+
+GIT_PROMPT_SYMBOL="git"
+SVN_PROMPT_SYMBOL="svn"
+GIT_PROMPT_AHEAD="${ssp_red}+${ssp_rst}"
+GIT_PROMPT_BEHIND="${ssp_cyn}-${ssp_rst}"
+GIT_PROMPT_MERGING="${ssp_mag}⚡︎${ssp_rst}"
+GIT_PROMPT_UNTRACKED="${ssp_bldred}?${ssp_rst}"
+GIT_PROMPT_MODIFIED="${ssp_bldyel}Δ${ssp_rst}"
+GIT_PROMPT_STAGED="${ssp_bldgrn}●${ssp_rst}"
+GIT_PROMPT_CLEAN="${ssp_bldgrn}✔${ssp_rst}"
+
+##########################
+# # # Prompt_command # # #
+##########################
+
+prompt_command() {
+
+ssp_exit="$?"
+ssp_stopped="$(jobs -sp | wc -l | tr -d " ")"
+ssp_running="$(jobs -rp | wc -l | tr -d " ")"
+
+PS1="$(ssp_userhost)$(ssp_return)$(ssp_runtime)$(ssp_jobs)$(inMux)$(dScreen)$(dTmux)$(ssp_charge)$(git_prompt_string)$(svn_prompt_string)$(ssp_load)$(ssp_timedate)$(ssp_history)
+${ssp_prompt} "
+}
+
+PROMPT_COMMAND=prompt_command
+
+#####################
+# # # Exit Code # # #
+#####################
+
+ssp_return() {
+  if [ $ssp_exit -ne 0 ]; then
+    echo -n ${LB}${ssp_red}${ssp_exit}${ssp_rst}${RB}
+  fi
+}
+
+##########################
+# # # USER@HOST:PATH # # #
+##########################
+
+ssp_userhost() {
+
+# red hostname if superuser
+  if [ $UID -eq 0 ]; then
+    local ssp_userformat="${ssp_red}${ssp_user}${ssp_rst}";
+  elif [ ${USER} != "$(logname 2>/dev/null)" ]; then
+    local ssp_userformat="${ssp_bldred}${ssp_user}${ssp_rst}";
+  else
+    local ssp_userformat="${ssp_user}"
+  fi
+
+# No hostname if local, cyan if ssh, red if telnet
+      local remoteMethod;
+  if [[ -n "$SSH_CLIENT$SSH2_CLIENT" ]] ; then
+    if [[ -n "$DISPLAY" ]]; then
+      local ssp_hostformat="${ssp_bldgrn}@${ssp_rst}${ssp_cyn}${ssp_host}${ssp_rst}";
+    else
+      local ssp_hostformat="${ssp_yel}@${ssp_cyn}${ssp_host}${ssp_rst}";
+    fi
+  else
+    local sess_src=$(who am i | sed -n 's/.*(\(.*\))/\1/p')
+      if [[ -z "$sess_src" || "$sess_src" = ":"* ]] ; then
+        local ssp_hostformat="" # Local
+      else
+        local ssp_hostformat="${ssp_yel}@${ssp_red}${ssp_host}${ssp_rst}";  # Telnet
+      fi
+  fi
+
+# Sets colon separating username and hostname to green if writable PWD, else red
+  if [ -w "${PWD}" ]; then
+    local ssp_colonformat="${ssp_grn}:${ssp_rst}";
+  else
+    local ssp_colonformat="${ssp_red}:${ssp_rst}";
+  fi
+
+  echo -n "${LB}${ssp_userformat}${ssp_hostformat}${ssp_colonformat}${ssp_bldwht}${ssp_pwd}${ssp_rst}${RB}"
+
+}
+
+#######################
+# # # TIME & DATE # # #
+#######################
+
+ssp_timedate()
+{
+  echo -n "${LB}${ssp_time}${DASH}${ssp_date}${RB}"
+}
+
+################
+# # # JOBS # # #
+################
+
+# Display number of running jobs (started with &)
+ssp_jobs() {
+  if [ ${ssp_running} -ne 0 ] || [ ${ssp_stopped} -ne 0 ]; then
+    echo -n "${LB}Jobs:${ssp_running}r/${ssp_stopped}s${RB}"
+  fi
+}
+
+########################
+# # # MULTIPLEXERS # # #
+########################
+
+# Display multiplexer that we are currently in
+inMux() {
+  if [[ -n $STY ]]; then
+    echo -n "$LB""screen""$RB"
+  fi
+  if [[ -n $TMUX ]]; then
+    echo -n "$LB""tmux""$RB"
+  fi
+}
+
+# Display number of detached screen sessions
+dScreen() {
+  local detScreens=$(screen -ls 2> /dev/null | grep -c Detach )
+  if [ $detScreens != "0" ]; then
+    echo -n "${LB}scrn:${ssp_mag}${detScreens}${ssp_rst}${RB}"
+  fi
+}
+
+# Display number of detached tmux sessions
+dTmux() {
+  local detTmux=$(tmux ls 2> /dev/null | grep -c windows)
+  if [ $detTmux != "0" ] && [[ -z $TMUX ]]; then
+    echo -n "${LB}tmux:${ssp_mag}${detTmux}${ssp_rst}${RB}"
+  fi
+}
+
+#################
+# # # POWER # # #
+#################
+
+# Displays battery capacity if < 100% and not plugged in, red if below 20%
+# Display charging symbol if plugged in and battery is < 100%
+
+function ssp_charge() {
+  if [[ $(uname) == "Darwin" ]] ; then
+
+    if [[ $(ioreg -rc AppleSmartBattery | grep -c '^.*"ExternalConnected"\ =\ Yes') -eq 1 ]]; then
+      local pluggedin=1
+    else
+      local pluggedin=0
+    fi
+
+    local maxcapacity="$(ioreg -rc "AppleSmartBattery"| grep '^.*"MaxCapacity"\ =\ ' | sed -e 's/^.*"MaxCapacity"\ =\ //')"
+    local currentcapacity="$(ioreg -rc "AppleSmartBattery"| grep '^.*"CurrentCapacity"\ =\ ' | sed -e 's/^.*CurrentCapacity"\ =\ //')"
+    batterycharge=$(echo "scale=2; ($currentcapacity / $maxcapacity)*100" | bc)
+    batterycharge=$( printf "%.0f" $batterycharge )
+    if [ $pluggedin -eq "0" ]; then
+      if [ $batterycharge -le "20" ]; then
+        echo -n "${LB}${ssp_red}${batterycharge}${ssp_rst}🔋${RB}"
+      else
+        echo -n "${LB}${batterycharge}🔋${RB}"
+      fi
+    else
+      if [ $batterycharge -lt 100 ]; then
+        echo -n "${LB}⚡️ ${batterycharge}${RB}"
+      fi
+    fi
+  fi
+}
+
+################
+# # # LOAD # # #
+################
+
+# Display current load average
+ssp_load() {
+  local osName=$(uname)
+  case $osName in
+    Darwin)    local OS=Darwin  ;;
+    SunOS)     local OS=SunOS   ;;
+    *)         local OS=Linux   ;;
+  esac
+
+  case "$OS" in
+    Linux)
+      local load eol
+      read load eol < /proc/loadavg
+      ;;
+    Darwin)
+      local load
+      load=$(LANG=C sysctl -n vm.loadavg | awk '{print $2}')
+      ;;
+    SunOS)
+      LANG=C uptime | awk '{print substr($10,0,length($10))}'
+      esac
+      echo "${LB}${load}⌂${RB}"
+}
+
+###############
+# # # GIT # # #
+###############
+
+# Show Git branch/tag, or name-rev if on detached head
+parse_git_branch() {
+  (git symbolic-ref -q --short HEAD || git name-rev --name-only --no-undefined --always HEAD) 2> /dev/null
+}
+
+# Show different symbols as appropriate for various Git repository states
+parse_git_state() {
+
+# Compose this value via multiple conditional appends.
+  local GIT_REMOTE_STATE=""
+  local GIT_LOCAL_STATE=""
+
+  local NUM_AHEAD="$(git log --oneline @{u}.. 2> /dev/null | wc -l | tr -d ' ')"
+  if [ "$NUM_AHEAD" -gt 0 ]; then
+    GIT_REMOTE_STATE=$GIT_REMOTE_STATE$GIT_PROMPT_AHEAD$NUM_AHEAD
+  fi
+
+  local NUM_BEHIND="$(git log --oneline ..@{u} 2> /dev/null | wc -l | tr -d ' ')"
+  if [ "$NUM_BEHIND" -gt 0 ]; then
+    GIT_REMOTE_STATE=$GIT_REMOTE_STATE$GIT_PROMPT_BEHIND$NUM_BEHIND
+  fi
+
+  local GIT_DIR="$(git rev-parse --git-dir 2> /dev/null)"
+  if [ -n $GIT_DIR ] && test -r $GIT_DIR/MERGE_HEAD; then
+    GIT_REMOTE_STATE=$GIT_REMOTE_STATE$GIT_PROMPT_MERGING
+  fi
+
+  local GIT_UNTRACKED_FILES="$(git ls-files --other --exclude-standard 2> /dev/null | wc -l | awk {'print $1'})"
+  if [ $GIT_UNTRACKED_FILES -gt "0" ]; then
+    GIT_LOCAL_STATE=$GIT_LOCAL_STATE$GIT_PROMPT_UNTRACKED$GIT_UNTRACKED_FILES
+  fi
+
+  local GIT_MODIFIED_FILES="$(git status | grep modified | wc -l | awk {'print $1'})"
+  if [ $GIT_MODIFIED_FILES -gt "0" ]; then
+    GIT_LOCAL_STATE=$GIT_LOCAL_STATE$GIT_PROMPT_MODIFIED$GIT_MODIFIED_FILES
+  fi
+
+  local GIT_STAGED_FILES="$(git status | grep "new file" | wc -l | awk {'print $1'})"
+  if [ $GIT_STAGED_FILES -gt "0" ]; then
+    GIT_LOCAL_STATE=$GIT_LOCAL_STATE$GIT_PROMPT_STAGED$GIT_STAGED_FILES
+  fi
+
+  if [[ -n $GIT_REMOTE_STATE ]]; then
+    echo "${LP}${GIT_REMOTE_STATE}${RP}"
+  fi
+
+  if [[ -n $GIT_LOCAL_STATE ]]; then
+    echo "${LP}${GIT_LOCAL_STATE}${RP}"
+  fi
+}
+
+# If inside a Git repository, print its branch and state
+git_prompt_string() {
+  local git_where="$(parse_git_branch)"
+    [ -n "$git_where" ] && echo -n "${LB}${LP}${GIT_PROMPT_SYMBOL}${RP}${LP}${git_where}${RP}$(parse_git_state)${RB}"
+}
+
+######################
+# # # SubVersioN # # #
+######################
+
+# Check to see if we're in an SVN repo
+get_svn_state() {
+  svn_info=$( (svn info | grep ^URL) 2>/dev/null )
+}
+
+parse_svn_info() {
+# Get the name of the branch.
+  branch_pattern="^URL: .*/(branches|tags)/([^/]+)"
+  trunk_pattern="^URL: .*/trunk(/.*)?$"
+  if [[ ${svn_info} =~ $branch_pattern ]]; then
+    SVN_BRANCH=${BASH_REMATCH[2]}
+  elif [[ ${svn_info} =~ $trunk_pattern ]]; then
+    SVN_BRANCH='trunk'
+  fi
+  if [[ -n $SVN_BRANCH ]]; then
+    SVN_STATE="${LP}${SVN_BRANCH}${RP}"
+  fi
+
+# Get the revision number
+  SVN_REVISION="$(svnversion)"
+  if [[ -n ${SVN_REVISION} ]]; then
+    SVN_STATE="${SVN_STATE}${LP}${SVN_REVISION}${RP}"
+  fi
+}
+
+
+# If inside an SVN repository, print its branch
+svn_prompt_string() {
+  get_svn_state
+    [ -n "$svn_info" ] && parse_svn_info && echo -n "${LB}${LP}${SVN_PROMPT_SYMBOL}${RP}${SVN_STATE}${RB}"
+}
+
+################################
+# # # VIRTUAL ENVIRONMENTS # # #
+################################
+
+# Detect if we are using a gemset
+rvm_gemset() {
+  if hash rvm 2>/dev/null; then
+  GEMSET=`rvm gemset list | grep '=>' | cut -b4-`
+    if [[ -n $GEMSET ]] && [ "$GEMSET" != '(default)' ]; then
+      echo "$LB""$GEMSET""$RB"
+    fi
+  fi
+}
+
+# Detect if we are using a virtualenv
+function virtualenv_info {
+  [ $VIRTUAL_ENV ] && echo '('`basename $VIRTUAL_ENV`') '
+}
+
+########################
+# # # Last Runtime # # #
+########################
+
+
+ssp_runtime()
+{
+  if [[ $ssp_runtime_seconds -ge "3" ]]; then
+    echo -n "${LB}${ssp_mag}"
+# display runtime seconds as days, hours, minutes, and seconds
+    [[ "$ssp_runtime_seconds" -ge 86400 ]] && echo -n $((ssp_runtime_seconds / 86400))d
+    [[ "$ssp_runtime_seconds" -ge 3600 ]] && echo -n $((ssp_runtime_seconds % 86400 / 3600))h
+    [[ "$ssp_runtime_seconds" -ge 60 ]] && echo -n $((ssp_runtime_seconds % 3600 / 60))m
+    echo -n $((ssp_runtime_seconds % 60))s
+    echo -n "${ssp_rst}${RB}"
+  fi
+}
+
+ssp_reset_runtime()
+{
+##################################
+# # # Command History Number # # #
+##################################
+
+ssp_history()
+{
+echo -n ${LB}${ssp_histnum}${RB}
+}
+
+#prompt_command is executed while building the prompt, so this means we're done (or null)
+  if [ "$BASH_COMMAND" = prompt_command ]; then 
+    if [[ $ssp_command_run -ne "1" ]]; then
+      ssp_runtime_mark=$SECONDS
+      ssp_runtime_seconds=0
+    else
+      ssp_runtime_seconds=$(( $SECONDS - ssp_runtime_mark))
+      ssp_command_run=0
+    fi
+  else
+    ssp_runtime_seconds=0
+    ssp_runtime_mark=$SECONDS
+    ssp_command_run=1
+  fi
+
+}
+trap ssp_reset_runtime DEBUG
